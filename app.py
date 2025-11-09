@@ -506,7 +506,9 @@ def main():
         st.session_state.analysis_count = 0
     if 'analysis_results' not in st.session_state:
         st.session_state.analysis_results = {}
-    
+    if 'preserve_analysis' not in st.session_state:
+        st.session_state.preserve_analysis = False
+
     # Initialize regular variables
     uploaded_files = []
     
@@ -705,8 +707,8 @@ def main():
             st.dataframe(doc_info, use_container_width=True)
             
             # Perform analysis
-            if st.button("🔍 Analyze Documents", type="primary"):
-                
+            if st.button("🔍 Analyze Documents", type="primary") or st.session_state.preserve_analysis:
+                st.session_state.preserve_analysis = True
                 # Validate num_clusters for algorithms that need it
                 if clustering_algorithm in ['KMeans', 'Hierarchical'] and num_clusters > len(documents):
                     st.error(f"❌ Number of clusters ({num_clusters}) cannot exceed the number of documents ({len(documents)}). Please adjust the slider in the sidebar.")
@@ -843,10 +845,11 @@ def main():
                     "Similarity Threshold", 
                     min_value=0.1, 
                     max_value=0.9, 
-                    value=0.5, 
+                    value=st.session_state.get('last_threshold', 0.5), 
                     step=0.1,
                     help="Adjust to show more/less connections",
-                    key=f"network_threshold_{unique_id}"
+                    key=f"network_threshold_{unique_id}",
+                    on_change=lambda: st.session_state.update({'last_threshold': st.session_state[f"network_threshold_{unique_id}"]})
                 )
                 network_fig = plot_similarity_network(similarity_matrix, doc_names, threshold=network_threshold)
                 if network_fig:
@@ -876,7 +879,7 @@ def main():
                     "Similarity Threshold", 
                     min_value=0.1, 
                     max_value=0.9, 
-                    value=0.5, 
+                    value=st.session_state.get('last_threshold', 0.5), 
                     step=0.1,
                     help="Adjust to show more/less connections",
                     key=f"network_threshold_{st.session_state.analysis_count}"
