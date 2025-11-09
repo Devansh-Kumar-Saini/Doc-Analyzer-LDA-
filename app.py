@@ -1,3 +1,11 @@
+from fastapi import FastAPI
+health_app = FastAPI()
+
+@health_app.get("/healthz")
+def health_check():
+    return {"status": "ok"}
+
+# Existing Streamlit code...
 import streamlit as st
 import pandas as pd
 import numpy as np
