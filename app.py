@@ -355,7 +355,7 @@ def plot_similarity_heatmap(similarity_matrix, doc_names):
     
     return fig
 
-def plot_clusters(reduced_data, cluster_labels, doc_names, method='PCA'):
+def plot_clusters(reduced_data, cluster_labels, doc_names, method='PCA', theme=None, color_palette=None):
     """Plot document clusters in 2D space"""
     df = pd.DataFrame({
         'x': reduced_data[:, 0],
@@ -378,6 +378,8 @@ def plot_clusters(reduced_data, cluster_labels, doc_names, method='PCA'):
     
     fig.update_traces(textposition='top center', marker=dict(size=12))
     
+    if theme and color_palette:
+        return apply_theme_settings(fig, theme, color_palette)
     return fig
 
 def create_wordcloud(topic_words, topic_num):
@@ -403,6 +405,77 @@ def create_wordcloud(topic_words, topic_num):
     
     return fig
 
+# New visualization functions
+def plot_topic_distributions(topic_distributions, doc_names, topics):
+    """Create interactive bar chart of topic distributions per document"""
+    df = pd.DataFrame(topic_distributions, columns=[f"Topic {i}" for i in range(len(topics))])
+    df['Document'] = doc_names
+    df = df.melt(id_vars='Document', var_name='Topic', value_name='Proportion')
+    
+    fig = px.bar(
+        df, 
+        x='Document', 
+        y='Proportion', 
+        color='Topic',
+        title='Topic Distributions per Document',
+        labels={'Proportion': 'Topic Proportion'},
+        height=600
+    )
+    fig.update_layout(barmode='stack', xaxis_tickangle=-45)
+    return fig
+
+def plot_similarity_network(similarity_matrix, doc_names, threshold=0.5):
+    """Create interactive network graph of document similarities"""
+    edges = []
+    for i in range(len(similarity_matrix)):
+        for j in range(i+1, len(similarity_matrix)):
+            if similarity_matrix[i][j] > threshold:
+                edges.append((i, j, similarity_matrix[i][j]))
+    
+    if not edges:
+        return None
+    
+    edge_x = []
+    edge_y = []
+    for edge in edges:
+        x0, y0 = np.random.rand(2)
+        x1, y1 = np.random.rand(2)
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+    
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=0.5, color='#888'),
+        hoverinfo='none',
+        mode='lines')
+
+    node_x = []
+    node_y = []
+    for i in range(len(doc_names)):
+        node_x.append(np.random.rand())
+        node_y.append(np.random.rand())
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers+text',
+        text=doc_names,
+        textposition='bottom center',
+        hovertext=[f"Connections: {sum(similarity_matrix[i] > threshold)-1}" for i in range(len(doc_names))],
+        marker=dict(
+            size=10,
+            line_width=2))
+
+    fig = go.Figure(data=[edge_trace, node_trace],
+                 layout=go.Layout(
+                    title='Document Similarity Network',
+                    showlegend=False,
+                    hovermode='closest',
+                    margin=dict(b=20,l=5,r=5,t=40),
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                )
+    return fig
+
 # Download functions
 def get_csv_download_link(df, filename):
     """Generate download link for CSV"""
@@ -411,15 +484,25 @@ def get_csv_download_link(df, filename):
     return f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download {filename}</a>'
 
 def fig_to_bytes(fig):
-    """Convert matplotlib figure to bytes"""
-    buf = BytesIO()
-    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-    buf.seek(0)
-    return buf
+    """Convert matplotlib or plotly figure to bytes"""
+    if hasattr(fig, 'savefig'):  # Matplotlib figure
+        buf = BytesIO()
+        fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+        buf.seek(0)
+        return buf
+    else:  # Plotly figure
+        try:
+            return fig.to_image(format='png', width=800, height=600, scale=2)
+        except ValueError:
+            # Fallback to SVG if Kaleido not available
+            return fig.to_image(format='svg')
 
 # Main Streamlit App
 def main():
     st.set_page_config(page_title="Document Similarity & Clustering Dashboard", layout="wide")
+    
+    # Initialize variables
+    uploaded_files = []
     
     st.title("📄 Document Similarity & Clustering Dashboard")
     st.markdown("Upload multiple documents to analyze topics, compute similarities, and discover clusters.")
@@ -457,6 +540,13 @@ def main():
     
     reduction_method = st.sidebar.selectbox("Dimensionality Reduction", ["PCA", "t-SNE"])
     
+    # Visualization Settings
+    st.sidebar.subheader("🎨 Visualization Settings")
+    theme = st.sidebar.selectbox("Theme", ["Light", "Dark"], index=0)
+    color_palette = st.sidebar.selectbox("Color Palette", 
+        ["Viridis", "Plasma", "Inferno", "Magma", "Cividis"], 
+        index=0)
+
     # Session Management
     st.sidebar.divider()
     st.sidebar.subheader("💾 Session Management")
@@ -574,313 +664,344 @@ def main():
             type=['txt', 'docx', 'doc', 'pdf', 'rtf', 'html', 'htm', 'md'],
             accept_multiple_files=True
         )
+        
+        # Initialize empty list if no files uploaded
+        if uploaded_files is None:
+            uploaded_files = []
     
     # Handle new analysis
-    if view_mode == "New Analysis" and uploaded_files and len(uploaded_files) >= 2:
-        st.success(f"✅ {len(uploaded_files)} documents uploaded successfully!")
-        
-        # Parse documents
-        with st.spinner("📖 Parsing documents..."):
-            documents = []
-            doc_names = []
+    if view_mode == "New Analysis":
+        if len(uploaded_files) >= 2:
+            st.success(f"✅ {len(uploaded_files)} documents uploaded successfully!")
             
-            for file in uploaded_files:
-                text = parse_document(file)
-                if text:
-                    documents.append(text)
-                    doc_names.append(file.name)
+            # Parse documents
+            with st.spinner("📖 Parsing documents..."):
+                documents = []
+                doc_names = []
+                
+                for file in uploaded_files:
+                    text = parse_document(file)
+                    if text:
+                        documents.append(text)
+                        doc_names.append(file.name)
+                
+                if len(documents) < 2:
+                    st.error("❌ Please upload at least 2 valid documents.")
+                    return
             
-            if len(documents) < 2:
-                st.error("❌ Please upload at least 2 valid documents.")
-                return
-        
-        # Display document info
-        st.subheader("📋 Uploaded Documents")
-        doc_info = pd.DataFrame({
-            'Document': doc_names,
-            'Length (chars)': [len(doc) for doc in documents],
-            'Word Count (approx)': [len(doc.split()) for doc in documents]
-        })
-        st.dataframe(doc_info, use_container_width=True)
-        
-        # Perform analysis
-        if st.button("🔍 Analyze Documents", type="primary"):
+            # Display document info
+            st.subheader("📋 Uploaded Documents")
+            doc_info = pd.DataFrame({
+                'Document': doc_names,
+                'Length (chars)': [len(doc) for doc in documents],
+                'Word Count (approx)': [len(doc.split()) for doc in documents]
+            })
+            st.dataframe(doc_info, use_container_width=True)
             
-            # Validate num_clusters for algorithms that need it
-            if clustering_algorithm in ['KMeans', 'Hierarchical'] and num_clusters > len(documents):
-                st.error(f"❌ Number of clusters ({num_clusters}) cannot exceed the number of documents ({len(documents)}). Please adjust the slider in the sidebar.")
-                return
-            
-            # LDA Topic Modeling
-            try:
-                with st.spinner("🧠 Performing LDA topic modeling..."):
-                    lda_model, topic_distributions, topics, dictionary, corpus = perform_lda(
-                        documents, 
-                        num_topics=num_topics, 
-                        num_words=num_words_per_topic,
-                        passes=lda_passes,
-                        iterations=lda_iterations,
-                        alpha=lda_alpha,
-                        eta=lda_eta
+            # Perform analysis
+            if st.button("🔍 Analyze Documents", type="primary"):
+                
+                # Validate num_clusters for algorithms that need it
+                if clustering_algorithm in ['KMeans', 'Hierarchical'] and num_clusters > len(documents):
+                    st.error(f"❌ Number of clusters ({num_clusters}) cannot exceed the number of documents ({len(documents)}). Please adjust the slider in the sidebar.")
+                    return
+                
+                # LDA Topic Modeling
+                try:
+                    with st.spinner("🧠 Performing LDA topic modeling..."):
+                        lda_model, topic_distributions, topics, dictionary, corpus = perform_lda(
+                            documents, 
+                            num_topics=num_topics, 
+                            num_words=num_words_per_topic,
+                            passes=lda_passes,
+                            iterations=lda_iterations,
+                            alpha=lda_alpha,
+                            eta=lda_eta
+                        )
+                    
+                    st.success("✅ Topic modeling complete!")
+                except ValueError as e:
+                    st.error(f"❌ Topic modeling failed: {str(e)}")
+                    st.info("💡 Try uploading documents with more content or adjust the number of topics.")
+                    return
+                except Exception as e:
+                    st.error(f"❌ An unexpected error occurred during topic modeling: {str(e)}")
+                    return
+                
+                # Display topics
+                st.header("📊 Discovered Topics")
+                cols = st.columns(2)
+                for idx, topic_words in enumerate(topics):
+                    col_idx = idx % 2
+                    with cols[col_idx]:
+                        st.subheader(f"Topic {idx}")
+                        words_str = ", ".join([f"{word} ({weight:.3f})" for word, weight in topic_words[:5]])
+                        st.write(words_str)
+                
+                # Compute similarity
+                with st.spinner("📐 Computing document similarities..."):
+                    similarity_matrix = compute_similarity_matrix(topic_distributions)
+                
+                # Clustering
+                with st.spinner(f"🎯 Clustering documents using {clustering_algorithm}..."):
+                    cluster_labels, clusterer = perform_clustering(
+                        topic_distributions, 
+                        algorithm=clustering_algorithm,
+                        num_clusters=num_clusters if num_clusters else 3,
+                        eps=dbscan_eps,
+                        min_samples=dbscan_min_samples
                     )
                 
-                st.success("✅ Topic modeling complete!")
-            except ValueError as e:
-                st.error(f"❌ Topic modeling failed: {str(e)}")
-                st.info("💡 Try uploading documents with more content or adjust the number of topics.")
-                return
-            except Exception as e:
-                st.error(f"❌ An unexpected error occurred during topic modeling: {str(e)}")
-                return
-            
-            # Display topics
-            st.header("📊 Discovered Topics")
-            cols = st.columns(2)
-            for idx, topic_words in enumerate(topics):
-                col_idx = idx % 2
-                with cols[col_idx]:
-                    st.subheader(f"Topic {idx}")
-                    words_str = ", ".join([f"{word} ({weight:.3f})" for word, weight in topic_words[:5]])
-                    st.write(words_str)
-            
-            # Compute similarity
-            with st.spinner("📐 Computing document similarities..."):
-                similarity_matrix = compute_similarity_matrix(topic_distributions)
-            
-            # Clustering
-            with st.spinner(f"🎯 Clustering documents using {clustering_algorithm}..."):
-                cluster_labels, clusterer = perform_clustering(
-                    topic_distributions, 
-                    algorithm=clustering_algorithm,
-                    num_clusters=num_clusters if num_clusters else 3,
-                    eps=dbscan_eps,
-                    min_samples=dbscan_min_samples
-                )
-            
-            # Dimensionality reduction
-            with st.spinner(f"🔬 Reducing dimensions using {reduction_method}..."):
-                reduced_data = reduce_dimensions(topic_distributions, method=reduction_method)
-            
-            # Store results in session state for potential saving/reuse
-            st.session_state['analysis_complete'] = True
-            st.session_state['current_documents'] = documents
-            st.session_state['current_doc_names'] = doc_names
-            st.session_state['current_topic_distributions'] = topic_distributions
-            st.session_state['current_topics'] = topics
-            st.session_state['current_cluster_labels'] = cluster_labels
-            st.session_state['current_similarity_matrix'] = similarity_matrix
-            st.session_state['current_reduced_data'] = reduced_data
-            st.session_state['current_parameters'] = {
-                'num_topics': num_topics,
-                'num_words_per_topic': num_words_per_topic,
-                'lda_passes': lda_passes,
-                'lda_iterations': lda_iterations,
-                'lda_alpha': lda_alpha,
-                'lda_eta': lda_eta,
-                'clustering_algorithm': clustering_algorithm,
-                'num_clusters': num_clusters,
-                'dbscan_eps': dbscan_eps,
-                'dbscan_min_samples': dbscan_min_samples,
-                'reduction_method': reduction_method
-            }
-            
-            # Visualizations
-            st.header("📈 Visualizations")
-            
-            # Similarity Heatmap
-            st.subheader("🔥 Document Similarity Heatmap")
-            heatmap_fig = plot_similarity_heatmap(similarity_matrix, doc_names)
-            st.plotly_chart(heatmap_fig, use_container_width=True)
-            
-            # Cluster Plot
-            st.subheader("🎨 Document Clusters")
-            cluster_fig = plot_clusters(reduced_data, cluster_labels, doc_names, method=reduction_method)
-            st.plotly_chart(cluster_fig, use_container_width=True)
-            
-            # Interactive Topic & Cluster Exploration
-            st.header("🔍 Interactive Exploration")
-            
-            # Create tabs for different views
-            tab1, tab2, tab3 = st.tabs(["📑 By Cluster", "📊 By Topic", "☁️ Word Clouds"])
-            
-            with tab1:
-                st.subheader("Documents by Cluster")
-                unique_clusters = sorted(set(cluster_labels))
+                # Dimensionality reduction
+                with st.spinner(f"🔬 Reducing dimensions using {reduction_method}..."):
+                    reduced_data = reduce_dimensions(topic_distributions, method=reduction_method)
                 
-                for cluster_id in unique_clusters:
-                    cluster_docs_indices = [i for i, label in enumerate(cluster_labels) if label == cluster_id]
-                    cluster_doc_names = [doc_names[i] for i in cluster_docs_indices]
-                    
-                    if cluster_id == -1:
-                        cluster_title = "Noise/Outliers (DBSCAN)"
-                    else:
-                        cluster_title = f"Cluster {cluster_id}"
-                    
-                    with st.expander(f"{cluster_title} ({len(cluster_doc_names)} documents)", expanded=False):
-                        for doc_idx in cluster_docs_indices:
-                            doc_name = doc_names[doc_idx]
-                            doc_text = documents[doc_idx]
-                            
-                            # Show document details
-                            st.markdown(f"**📄 {doc_name}**")
-                            
-                            # Show topic distribution for this document
-                            topic_dist = topic_distributions[doc_idx]
-                            dominant_topics = sorted(enumerate(topic_dist), key=lambda x: x[1], reverse=True)[:3]
-                            
-                            topics_str = ", ".join([f"Topic {idx} ({prob:.2%})" for idx, prob in dominant_topics])
-                            st.caption(f"Dominant Topics: {topics_str}")
-                            
-                            # Show document preview
-                            preview_text = doc_text[:300] + "..." if len(doc_text) > 300 else doc_text
-                            st.text_area(f"Preview", preview_text, height=100, key=f"preview_{cluster_id}_{doc_idx}", disabled=True)
-                            st.divider()
-            
-            with tab2:
-                st.subheader("Documents by Dominant Topic")
+                # Store results in session state for potential saving/reuse
+                st.session_state['analysis_complete'] = True
+                st.session_state['current_documents'] = documents
+                st.session_state['current_doc_names'] = doc_names
+                st.session_state['current_topic_distributions'] = topic_distributions
+                st.session_state['current_topics'] = topics
+                st.session_state['current_cluster_labels'] = cluster_labels
+                st.session_state['current_similarity_matrix'] = similarity_matrix
+                st.session_state['current_reduced_data'] = reduced_data
+                st.session_state['current_parameters'] = {
+                    'num_topics': num_topics,
+                    'num_words_per_topic': num_words_per_topic,
+                    'lda_passes': lda_passes,
+                    'lda_iterations': lda_iterations,
+                    'lda_alpha': lda_alpha,
+                    'lda_eta': lda_eta,
+                    'clustering_algorithm': clustering_algorithm,
+                    'num_clusters': num_clusters,
+                    'dbscan_eps': dbscan_eps,
+                    'dbscan_min_samples': dbscan_min_samples,
+                    'reduction_method': reduction_method
+                }
                 
-                # Determine dominant topic for each document
-                dominant_topic_per_doc = [np.argmax(dist) for dist in topic_distributions]
+                # Generate a truly unique analysis ID
+                import time
+                import random
+                analysis_id = f"analysis_{int(time.time())}_{random.randint(0, 999999)}"
                 
-                for topic_idx in range(num_topics):
-                    docs_in_topic = [i for i, dom_topic in enumerate(dominant_topic_per_doc) if dom_topic == topic_idx]
-                    
-                    if docs_in_topic:
-                        topic_words_str = ", ".join([word for word, _ in topics[topic_idx][:5]])
-                        
-                        with st.expander(f"Topic {topic_idx}: {topic_words_str} ({len(docs_in_topic)} documents)", expanded=False):
-                            for doc_idx in docs_in_topic:
-                                doc_name = doc_names[doc_idx]
-                                topic_strength = topic_distributions[doc_idx][topic_idx]
-                                cluster_id = cluster_labels[doc_idx]
-                                
-                                st.markdown(f"**📄 {doc_name}** (Topic strength: {topic_strength:.2%}, Cluster: {cluster_id})")
-                                
-                                # Show document preview
-                                preview_text = documents[doc_idx][:200] + "..." if len(documents[doc_idx]) > 200 else documents[doc_idx]
-                                st.caption(preview_text)
-                                st.divider()
-            
-            with tab3:
-                st.subheader("Topic Word Clouds")
-                num_cols = 2
-                rows = (num_topics + num_cols - 1) // num_cols
+                # Visualizations
+                st.header("📈 Visualizations")
                 
-                for row in range(rows):
-                    cols = st.columns(num_cols)
-                    for col_idx in range(num_cols):
-                        topic_idx = row * num_cols + col_idx
-                        if topic_idx < num_topics:
-                            with cols[col_idx]:
-                                wc_fig = create_wordcloud(topics[topic_idx], topic_idx)
-                                st.pyplot(wc_fig)
-                                plt.close(wc_fig)
-            
-            # Downloads
-            st.header("💾 Download Results")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            # Similarity Matrix CSV
-            with col1:
-                st.subheader("Similarity Scores")
-                similarity_df = pd.DataFrame(similarity_matrix, columns=doc_names, index=doc_names)
-                csv = similarity_df.to_csv()
-                st.download_button(
-                    label="📥 Download Similarity CSV",
-                    data=csv,
-                    file_name="similarity_matrix.csv",
-                    mime="text/csv"
+                # Initialize analysis counter in session state if not exists
+                if 'analysis_count' not in st.session_state:
+                    st.session_state.analysis_count = 0
+                
+                # Increment counter for this analysis
+                st.session_state.analysis_count += 1
+                
+                # Topic Distribution Bar Chart
+                st.subheader(f"📊 Topic Distributions (Analysis #{st.session_state.analysis_count})")
+                topic_dist_fig = plot_topic_distributions(topic_distributions, doc_names, topics)
+                st.plotly_chart(topic_dist_fig, use_container_width=True, key=f"topic_dist_{analysis_id}")
+                
+                # Similarity Network Graph
+                st.subheader(f"🕸️ Document Similarity Network (Analysis #{st.session_state.analysis_count})")
+                network_threshold = st.slider(
+                    "Similarity Threshold", 
+                    min_value=0.1, 
+                    max_value=0.9, 
+                    value=0.5, 
+                    step=0.1,
+                    help="Adjust to show more/less connections",
+                    key=f"network_threshold_{analysis_id}"
                 )
-            
-            # Cluster Labels CSV
-            with col2:
-                st.subheader("Cluster Assignments")
-                cluster_df = pd.DataFrame({
-                    'Document': doc_names,
-                    'Cluster': cluster_labels
-                })
-                csv = cluster_df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Clusters CSV",
-                    data=csv,
-                    file_name="cluster_assignments.csv",
-                    mime="text/csv"
-                )
-            
-            # Topic Distributions CSV
-            with col3:
-                st.subheader("Topic Distributions")
-                topic_dist_df = pd.DataFrame(
-                    topic_distributions,
-                    columns=[f'Topic_{i}' for i in range(num_topics)],
-                    index=doc_names
-                )
-                csv = topic_dist_df.to_csv()
-                st.download_button(
-                    label="📥 Download Topics CSV",
-                    data=csv,
-                    file_name="topic_distributions.csv",
-                    mime="text/csv"
-                )
-            
-            # Word Cloud Images
-            st.subheader("☁️ Word Cloud Images")
-            wc_cols = st.columns(min(3, num_topics))
-            for idx in range(num_topics):
-                col_idx = idx % 3
-                with wc_cols[col_idx]:
-                    wc_fig = create_wordcloud(topics[idx], idx)
-                    img_bytes = fig_to_bytes(wc_fig)
+                network_fig = plot_similarity_network(similarity_matrix, doc_names, threshold=network_threshold)
+                if network_fig:
+                    st.plotly_chart(network_fig, use_container_width=True, key=f"network_{analysis_id}")
+                else:
+                    st.warning("No strong connections found at this threshold. Try lowering the threshold.")
+                
+                # Heatmap
+                st.subheader(f"🔥 Document Similarity Heatmap (Analysis #{st.session_state.analysis_count})")
+                heatmap_fig = plot_similarity_heatmap(similarity_matrix, doc_names)
+                st.plotly_chart(heatmap_fig, use_container_width=True, key=f"heatmap_{analysis_id}")
+                
+                # Cluster Plot
+                st.subheader(f"🎨 Document Clusters (Analysis #{st.session_state.analysis_count})")
+                cluster_fig = plot_clusters(reduced_data, cluster_labels, doc_names, method=reduction_method, theme=theme, color_palette=color_palette)
+                st.plotly_chart(cluster_fig, use_container_width=True, key=f"clusters_{analysis_id}")
+                
+                # Downloads
+                st.header("💾 Download Results")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                # Similarity Matrix CSV
+                with col1:
+                    st.subheader("Similarity Scores")
+                    similarity_df = pd.DataFrame(similarity_matrix, columns=doc_names, index=doc_names)
+                    csv = similarity_df.to_csv()
                     st.download_button(
-                        label=f"📥 Topic {idx} Word Cloud",
-                        data=img_bytes,
-                        file_name=f"topic_{idx}_wordcloud.png",
-                        mime="image/png"
+                        label="📥 Download Similarity CSV",
+                        data=csv,
+                        file_name="similarity_matrix.csv",
+                        mime="text/csv"
                     )
-                    plt.close(wc_fig)
-            
-            # Save Session Section
-            st.header("💾 Save This Analysis")
-            col_save1, col_save2 = st.columns([3, 1])
-            
-            with col_save1:
-                session_name_input = st.text_input("Session Name", value=f"Analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-            
-            with col_save2:
-                st.write("")  # Spacing
-                st.write("")  # Spacing
-                if st.button("💾 Save Session", type="secondary"):
-                    parameters = {
-                        'num_topics': num_topics,
-                        'num_words_per_topic': num_words_per_topic,
-                        'lda_passes': lda_passes,
-                        'lda_iterations': lda_iterations,
-                        'lda_alpha': lda_alpha,
-                        'lda_eta': lda_eta,
-                        'clustering_algorithm': clustering_algorithm,
-                        'num_clusters': num_clusters,
-                        'dbscan_eps': dbscan_eps,
-                        'dbscan_min_samples': dbscan_min_samples,
-                        'reduction_method': reduction_method
-                    }
-                    
-                    if save_analysis_session(
-                        session_name_input,
-                        documents,
-                        doc_names,
+                
+                # Cluster Labels CSV
+                with col2:
+                    st.subheader("Cluster Assignments")
+                    cluster_df = pd.DataFrame({
+                        'Document': doc_names,
+                        'Cluster': cluster_labels
+                    })
+                    csv = cluster_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Clusters CSV",
+                        data=csv,
+                        file_name="cluster_assignments.csv",
+                        mime="text/csv"
+                    )
+                
+                # Topic Distributions CSV
+                with col3:
+                    st.subheader("Topic Distributions")
+                    topic_dist_df = pd.DataFrame(
                         topic_distributions,
-                        topics,
-                        cluster_labels,
-                        similarity_matrix,
-                        parameters
-                    ):
-                        st.success(f"✅ Session '{session_name_input}' saved successfully!")
-                    else:
-                        st.error("❌ Failed to save session. Please check database connection.")
+                        columns=[f'Topic_{i}' for i in range(num_topics)],
+                        index=doc_names
+                    )
+                    csv = topic_dist_df.to_csv()
+                    st.download_button(
+                        label="📥 Download Topics CSV",
+                        data=csv,
+                        file_name="topic_distributions.csv",
+                        mime="text/csv"
+                    )
+                
+                # Word Cloud Images
+                st.subheader("☁️ Word Cloud Images")
+                wc_cols = st.columns(min(3, num_topics))
+                for idx in range(num_topics):
+                    col_idx = idx % 3
+                    with wc_cols[col_idx]:
+                        wc_fig = create_wordcloud(topics[idx], idx)
+                        img_bytes = fig_to_bytes(wc_fig)
+                        st.download_button(
+                            label=f"📥 Topic {idx} Word Cloud",
+                            data=img_bytes,
+                            file_name=f"topic_{idx}_wordcloud.png",
+                            mime="image/png"
+                        )
+                        plt.close(wc_fig)
+                
+                # Enhanced Visualizations Section
+                st.header("📈 Enhanced Visualizations")
+                
+                # Topic Distribution Bar Chart
+                st.subheader("📊 Topic Distributions")
+                topic_dist_fig = plot_topic_distributions(topic_distributions, doc_names, topics)
+                st.plotly_chart(topic_dist_fig, use_container_width=True)
+                
+                # Similarity Network Graph
+                st.subheader("🕸️ Document Similarity Network")
+                network_threshold = st.slider("Similarity Threshold", min_value=0.1, max_value=0.9, value=0.5, step=0.1, 
+                                             help="Adjust to show more/less connections")
+                network_fig = plot_similarity_network(similarity_matrix, doc_names, threshold=network_threshold)
+                if network_fig:
+                    st.plotly_chart(network_fig, use_container_width=True)
+                else:
+                    st.warning("No strong connections found at this threshold. Try lowering the threshold.")
+                
+                # Heatmap
+                st.subheader("🔥 Document Similarity Heatmap")
+                heatmap_fig = plot_similarity_heatmap(similarity_matrix, doc_names)
+                st.plotly_chart(heatmap_fig, use_container_width=True)
+                
+                # Cluster Plot
+                st.subheader("🎨 Document Clusters")
+                cluster_fig = plot_clusters(reduced_data, cluster_labels, doc_names, method=reduction_method, theme=theme, color_palette=color_palette)
+                st.plotly_chart(cluster_fig, use_container_width=True)
+                
+                # Enhanced Downloads Section
+                st.header("💾 Enhanced Download Options")
+                
+                # Create tabs for different download formats
+                dl_tab1, dl_tab2, dl_tab3 = st.tabs(["📷 Images", "📄 HTML", "📚 Full Report"])
+                
+                with dl_tab1:
+                    st.subheader("Download Visualizations as Images")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.download_button(
+                            label="📥 Heatmap",
+                            data=fig_to_bytes(heatmap_fig),
+                            file_name="similarity_heatmap.png",
+                            mime="image/png"
+                        )
+                    
+                    with col2:
+                        st.download_button(
+                            label="📥 Cluster Plot",
+                            data=fig_to_bytes(cluster_fig),
+                            file_name="document_clusters.png",
+                            mime="image/png"
+                        )
+                    
+                    with col3:
+                        if network_fig:
+                            st.download_button(
+                                label="📥 Network Graph",
+                                data=fig_to_bytes(network_fig),
+                                file_name="similarity_network.png",
+                                mime="image/png"
+                            )
+                
+                with dl_tab2:
+                    st.subheader("Download Interactive HTML")
+                    st.warning("HTML export coming soon! This will allow you to save interactive versions of the visualizations.")
+                
+                with dl_tab3:
+                    st.subheader("Generate Full Report")
+                    st.warning("PDF report generation coming soon! This will compile all analysis results into a single PDF.")
+                
+                # Save Session Section
+                st.header("💾 Save This Analysis")
+                col_save1, col_save2 = st.columns([3, 1])
+                
+                with col_save1:
+                    session_name_input = st.text_input("Session Name", value=f"Analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                
+                with col_save2:
+                    st.write("")  # Spacing
+                    st.write("")  # Spacing
+                    if st.button("💾 Save Session", type="secondary"):
+                        parameters = {
+                            'num_topics': num_topics,
+                            'num_words_per_topic': num_words_per_topic,
+                            'lda_passes': lda_passes,
+                            'lda_iterations': lda_iterations,
+                            'lda_alpha': lda_alpha,
+                            'lda_eta': lda_eta,
+                            'clustering_algorithm': clustering_algorithm,
+                            'num_clusters': num_clusters,
+                            'dbscan_eps': dbscan_eps,
+                            'dbscan_min_samples': dbscan_min_samples,
+                            'reduction_method': reduction_method
+                        }
+                        
+                        if save_analysis_session(
+                            session_name_input,
+                            documents,
+                            doc_names,
+                            topic_distributions,
+                            topics,
+                            cluster_labels,
+                            similarity_matrix,
+                            parameters
+                        ):
+                            st.success(f"✅ Session '{session_name_input}' saved successfully!")
+                        else:
+                            st.error("❌ Failed to save session. Please check database connection.")
             
-    elif view_mode == "New Analysis" and uploaded_files and len(uploaded_files) < 2:
-        st.warning("⚠️ Please upload at least 2 documents to perform analysis.")
+    elif view_mode == "New Analysis" and uploaded_files and len(uploaded_files) == 1:
+        st.error("❌ Please upload at least 2 documents for analysis.")
     else:
         st.info("👆 Upload at least 2 documents to get started.")
         
@@ -904,6 +1025,26 @@ def main():
             - **Clustering**: Groups similar documents together using KMeans algorithm
             - **Visualization**: Provides interactive charts and word clouds for easy interpretation
             """)
+
+def apply_theme_settings(fig, theme, color_palette):
+    """Apply theme and color settings to figures"""
+    if theme == "Dark":
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+    else:
+        fig.update_layout(template="plotly_white")
+    
+    # Apply color palette based on plot type
+    for trace in fig.data:
+        if trace.type == 'scatter':
+            trace.update(marker=dict(colorscale=color_palette.lower()))
+        elif trace.type == 'heatmap':
+            trace.update(colorscale=color_palette.lower())
+    
+    return fig
 
 if __name__ == "__main__":
     main()
