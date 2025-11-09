@@ -501,7 +501,13 @@ def fig_to_bytes(fig):
 def main():
     st.set_page_config(page_title="Document Similarity & Clustering Dashboard", layout="wide")
     
-    # Initialize variables
+    # Initialize session state variables
+    if 'analysis_count' not in st.session_state:
+        st.session_state.analysis_count = 0
+    if 'analysis_results' not in st.session_state:
+        st.session_state.analysis_results = {}
+    
+    # Initialize regular variables
     uploaded_files = []
     
     st.title("📄 Document Similarity & Clustering Dashboard")
@@ -756,48 +762,80 @@ def main():
                 with st.spinner(f"🔬 Reducing dimensions using {reduction_method}..."):
                     reduced_data = reduce_dimensions(topic_distributions, method=reduction_method)
                 
-                # Store results in session state for potential saving/reuse
-                st.session_state['analysis_complete'] = True
-                st.session_state['current_documents'] = documents
-                st.session_state['current_doc_names'] = doc_names
-                st.session_state['current_topic_distributions'] = topic_distributions
-                st.session_state['current_topics'] = topics
-                st.session_state['current_cluster_labels'] = cluster_labels
-                st.session_state['current_similarity_matrix'] = similarity_matrix
-                st.session_state['current_reduced_data'] = reduced_data
-                st.session_state['current_parameters'] = {
-                    'num_topics': num_topics,
-                    'num_words_per_topic': num_words_per_topic,
-                    'lda_passes': lda_passes,
-                    'lda_iterations': lda_iterations,
-                    'lda_alpha': lda_alpha,
-                    'lda_eta': lda_eta,
-                    'clustering_algorithm': clustering_algorithm,
-                    'num_clusters': num_clusters,
-                    'dbscan_eps': dbscan_eps,
-                    'dbscan_min_samples': dbscan_min_samples,
-                    'reduction_method': reduction_method
+                # Store results in session state first
+                st.session_state['analysis_results'] = {
+                    'documents': documents,
+                    'doc_names': doc_names,
+                    'topic_distributions': topic_distributions,
+                    'topics': topics,
+                    'cluster_labels': cluster_labels,
+                    'similarity_matrix': similarity_matrix,
+                    'reduced_data': reduced_data,
+                    'params': {
+                        'num_topics': num_topics,
+                        'num_words_per_topic': num_words_per_topic,
+                        'lda_passes': lda_passes,
+                        'lda_iterations': lda_iterations,
+                        'lda_alpha': lda_alpha,
+                        'lda_eta': lda_eta,
+                        'clustering_algorithm': clustering_algorithm,
+                        'num_clusters': num_clusters,
+                        'dbscan_eps': dbscan_eps,
+                        'dbscan_min_samples': dbscan_min_samples,
+                        'reduction_method': reduction_method
+                    }
                 }
                 
-                # Generate a truly unique analysis ID
+                # Downloads section moved BEFORE visualizations
+                st.header("💾 Download Options")
+                with st.expander("Click to show download options", expanded=False):
+                    dl_tab1, dl_tab2, dl_tab3 = st.tabs(["📷 Images", "📄 HTML", "📚 Full Report"])
+                    
+                    with dl_tab1:
+                        st.subheader("Download Visualizations as Images")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            heatmap_fig = plot_similarity_heatmap(similarity_matrix, doc_names)
+                            st.download_button(
+                                label="📥 Heatmap",
+                                data=fig_to_bytes(heatmap_fig),
+                                file_name="similarity_heatmap.png",
+                                mime="image/png",
+                                key="dl_heatmap"
+                            )
+                        
+                        with col2:
+                            cluster_fig = plot_clusters(reduced_data, cluster_labels, doc_names, method=reduction_method, theme=theme, color_palette=color_palette)
+                            st.download_button(
+                                label="📥 Cluster Plot",
+                                data=fig_to_bytes(cluster_fig),
+                                file_name="document_clusters.png",
+                                mime="image/png",
+                                key="dl_cluster"
+                            )
+                        
+                        with col3:
+                            network_fig = plot_similarity_network(similarity_matrix, doc_names, threshold=0.5)
+                            if network_fig:
+                                st.download_button(
+                                    label="📥 Network Graph",
+                                    data=fig_to_bytes(network_fig),
+                                    file_name="similarity_network.png",
+                                    mime="image/png",
+                                    key="dl_network"
+                                )
+                
+                # Then show visualizations
+                st.header("📈 Analysis Results")
+                # Generate truly unique analysis ID
                 import time
-                import random
-                analysis_id = f"analysis_{int(time.time())}_{random.randint(0, 999999)}"
-                
-                # Visualizations
-                st.header("📈 Visualizations")
-                
-                # Initialize analysis counter in session state if not exists
-                if 'analysis_count' not in st.session_state:
-                    st.session_state.analysis_count = 0
-                
-                # Increment counter for this analysis
-                st.session_state.analysis_count += 1
+                unique_id = f"{int(time.time())}_{st.session_state.analysis_count}"
                 
                 # Topic Distribution Bar Chart
                 st.subheader(f"📊 Topic Distributions (Analysis #{st.session_state.analysis_count})")
                 topic_dist_fig = plot_topic_distributions(topic_distributions, doc_names, topics)
-                st.plotly_chart(topic_dist_fig, use_container_width=True, key=f"topic_dist_{analysis_id}")
+                st.plotly_chart(topic_dist_fig, use_container_width=True, key=f"topic_dist_{unique_id}")
                 
                 # Similarity Network Graph
                 st.subheader(f"🕸️ Document Similarity Network (Analysis #{st.session_state.analysis_count})")
@@ -808,115 +846,54 @@ def main():
                     value=0.5, 
                     step=0.1,
                     help="Adjust to show more/less connections",
-                    key=f"network_threshold_{analysis_id}"
+                    key=f"network_threshold_{unique_id}"
                 )
                 network_fig = plot_similarity_network(similarity_matrix, doc_names, threshold=network_threshold)
                 if network_fig:
-                    st.plotly_chart(network_fig, use_container_width=True, key=f"network_{analysis_id}")
-                else:
-                    st.warning("No strong connections found at this threshold. Try lowering the threshold.")
+                    st.plotly_chart(network_fig, use_container_width=True, key=f"network_{unique_id}")
                 
                 # Heatmap
                 st.subheader(f"🔥 Document Similarity Heatmap (Analysis #{st.session_state.analysis_count})")
                 heatmap_fig = plot_similarity_heatmap(similarity_matrix, doc_names)
-                st.plotly_chart(heatmap_fig, use_container_width=True, key=f"heatmap_{analysis_id}")
+                st.plotly_chart(heatmap_fig, use_container_width=True, key=f"heatmap_{unique_id}")
                 
                 # Cluster Plot
                 st.subheader(f"🎨 Document Clusters (Analysis #{st.session_state.analysis_count})")
                 cluster_fig = plot_clusters(reduced_data, cluster_labels, doc_names, method=reduction_method, theme=theme, color_palette=color_palette)
-                st.plotly_chart(cluster_fig, use_container_width=True, key=f"clusters_{analysis_id}")
-                
-                # Downloads
-                st.header("💾 Download Results")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                # Similarity Matrix CSV
-                with col1:
-                    st.subheader("Similarity Scores")
-                    similarity_df = pd.DataFrame(similarity_matrix, columns=doc_names, index=doc_names)
-                    csv = similarity_df.to_csv()
-                    st.download_button(
-                        label="📥 Download Similarity CSV",
-                        data=csv,
-                        file_name="similarity_matrix.csv",
-                        mime="text/csv"
-                    )
-                
-                # Cluster Labels CSV
-                with col2:
-                    st.subheader("Cluster Assignments")
-                    cluster_df = pd.DataFrame({
-                        'Document': doc_names,
-                        'Cluster': cluster_labels
-                    })
-                    csv = cluster_df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Clusters CSV",
-                        data=csv,
-                        file_name="cluster_assignments.csv",
-                        mime="text/csv"
-                    )
-                
-                # Topic Distributions CSV
-                with col3:
-                    st.subheader("Topic Distributions")
-                    topic_dist_df = pd.DataFrame(
-                        topic_distributions,
-                        columns=[f'Topic_{i}' for i in range(num_topics)],
-                        index=doc_names
-                    )
-                    csv = topic_dist_df.to_csv()
-                    st.download_button(
-                        label="📥 Download Topics CSV",
-                        data=csv,
-                        file_name="topic_distributions.csv",
-                        mime="text/csv"
-                    )
-                
-                # Word Cloud Images
-                st.subheader("☁️ Word Cloud Images")
-                wc_cols = st.columns(min(3, num_topics))
-                for idx in range(num_topics):
-                    col_idx = idx % 3
-                    with wc_cols[col_idx]:
-                        wc_fig = create_wordcloud(topics[idx], idx)
-                        img_bytes = fig_to_bytes(wc_fig)
-                        st.download_button(
-                            label=f"📥 Topic {idx} Word Cloud",
-                            data=img_bytes,
-                            file_name=f"topic_{idx}_wordcloud.png",
-                            mime="image/png"
-                        )
-                        plt.close(wc_fig)
+                st.plotly_chart(cluster_fig, use_container_width=True, key=f"clusters_{unique_id}")
                 
                 # Enhanced Visualizations Section
                 st.header("📈 Enhanced Visualizations")
                 
                 # Topic Distribution Bar Chart
-                st.subheader("📊 Topic Distributions")
+                st.subheader(f"📊 Topic Distributions (Analysis #{st.session_state.analysis_count})")
                 topic_dist_fig = plot_topic_distributions(topic_distributions, doc_names, topics)
-                st.plotly_chart(topic_dist_fig, use_container_width=True)
+                st.plotly_chart(topic_dist_fig, use_container_width=True, key=f"topic_dist_chart_{st.session_state.analysis_count}")
                 
                 # Similarity Network Graph
-                st.subheader("🕸️ Document Similarity Network")
-                network_threshold = st.slider("Similarity Threshold", min_value=0.1, max_value=0.9, value=0.5, step=0.1, 
-                                             help="Adjust to show more/less connections")
+                st.subheader(f"🕸️ Document Similarity Network (Analysis #{st.session_state.analysis_count})")
+                network_threshold = st.slider(
+                    "Similarity Threshold", 
+                    min_value=0.1, 
+                    max_value=0.9, 
+                    value=0.5, 
+                    step=0.1,
+                    help="Adjust to show more/less connections",
+                    key=f"network_threshold_{st.session_state.analysis_count}"
+                )
                 network_fig = plot_similarity_network(similarity_matrix, doc_names, threshold=network_threshold)
                 if network_fig:
-                    st.plotly_chart(network_fig, use_container_width=True)
-                else:
-                    st.warning("No strong connections found at this threshold. Try lowering the threshold.")
+                    st.plotly_chart(network_fig, use_container_width=True, key=f"network_chart_{st.session_state.analysis_count}")
                 
                 # Heatmap
-                st.subheader("🔥 Document Similarity Heatmap")
+                st.subheader(f"🔥 Document Similarity Heatmap (Analysis #{st.session_state.analysis_count})")
                 heatmap_fig = plot_similarity_heatmap(similarity_matrix, doc_names)
-                st.plotly_chart(heatmap_fig, use_container_width=True)
+                st.plotly_chart(heatmap_fig, use_container_width=True, key=f"heatmap_chart_{st.session_state.analysis_count}")
                 
                 # Cluster Plot
-                st.subheader("🎨 Document Clusters")
+                st.subheader(f"🎨 Document Clusters (Analysis #{st.session_state.analysis_count})")
                 cluster_fig = plot_clusters(reduced_data, cluster_labels, doc_names, method=reduction_method, theme=theme, color_palette=color_palette)
-                st.plotly_chart(cluster_fig, use_container_width=True)
+                st.plotly_chart(cluster_fig, use_container_width=True, key=f"cluster_chart_{st.session_state.analysis_count}")
                 
                 # Enhanced Downloads Section
                 st.header("💾 Enhanced Download Options")
