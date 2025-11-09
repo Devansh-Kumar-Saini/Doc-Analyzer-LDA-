@@ -1,0 +1,16 @@
+nltk
+pandas
+numpy
+sqlalchemy
+PyPDF2
+python-docx
+striprtf
+streamlit
+plotly
+seaborn
+matplotlib
+wordcloud
+gensim
+scikit-learn
+beautifulsoup4
+markdown

@@ -1,0 +1,10 @@
+{
+  "test_id": 1,
+  "name": "Sample JSON",
+  "active": true,
+  "values": [1, 2, 3],
+  "metadata": {
+    "created": "2025-11-09",
+    "author": "Tester"
+  }
+}
