@@ -765,6 +765,7 @@ def main():
                     reduced_data = reduce_dimensions(topic_distributions, method=reduction_method)
                 
                 # Store results in session state first
+                st.session_state.analysis_count += 1
                 st.session_state['analysis_results'] = {
                     'documents': documents,
                     'doc_names': doc_names,
@@ -830,17 +831,14 @@ def main():
                 
                 # Then show visualizations
                 st.header("📈 Analysis Results")
-                # Generate truly unique analysis ID
-                import time
-                unique_id = f"{int(time.time())}_{st.session_state.analysis_count}"
                 
                 # Topic Distribution Bar Chart
-                st.subheader(f"📊 Topic Distributions (Analysis #{st.session_state.analysis_count})")
+                st.subheader("📊 Topic Distributions")
                 topic_dist_fig = plot_topic_distributions(topic_distributions, doc_names, topics)
-                st.plotly_chart(topic_dist_fig, use_container_width=True, key=f"topic_dist_{unique_id}")
+                st.plotly_chart(topic_dist_fig, use_container_width=True, key=f"topic_dist_{datetime.now().timestamp()}")
                 
                 # Similarity Network Graph
-                st.subheader(f"🕸️ Document Similarity Network (Analysis #{st.session_state.analysis_count})")
+                st.subheader("🕸️ Document Similarity Network")
                 network_threshold = st.slider(
                     "Similarity Threshold", 
                     min_value=0.1, 
@@ -848,55 +846,53 @@ def main():
                     value=st.session_state.get('last_threshold', 0.5), 
                     step=0.1,
                     help="Adjust to show more/less connections",
-                    key=f"network_threshold_{unique_id}",
-                    on_change=lambda: st.session_state.update({'last_threshold': st.session_state[f"network_threshold_{unique_id}"]})
+                    key=f"network_threshold_{datetime.now().timestamp()}"
                 )
                 network_fig = plot_similarity_network(similarity_matrix, doc_names, threshold=network_threshold)
                 if network_fig:
-                    st.plotly_chart(network_fig, use_container_width=True, key=f"network_{unique_id}")
+                    st.plotly_chart(network_fig, use_container_width=True, key=f"network_{datetime.now().timestamp()}")
                 
                 # Heatmap
-                st.subheader(f"🔥 Document Similarity Heatmap (Analysis #{st.session_state.analysis_count})")
+                st.subheader("🔥 Document Similarity Heatmap")
                 heatmap_fig = plot_similarity_heatmap(similarity_matrix, doc_names)
-                st.plotly_chart(heatmap_fig, use_container_width=True, key=f"heatmap_{unique_id}")
+                st.plotly_chart(heatmap_fig, use_container_width=True, key=f"heatmap_{datetime.now().timestamp()}")
                 
                 # Cluster Plot
-                st.subheader(f"🎨 Document Clusters (Analysis #{st.session_state.analysis_count})")
+                st.subheader("🎨 Document Clusters")
                 cluster_fig = plot_clusters(reduced_data, cluster_labels, doc_names, method=reduction_method, theme=theme, color_palette=color_palette)
-                st.plotly_chart(cluster_fig, use_container_width=True, key=f"clusters_{unique_id}")
+                st.plotly_chart(cluster_fig, use_container_width=True, key=f"clusters_{datetime.now().timestamp()}")
                 
                 # Enhanced Visualizations Section
                 st.header("📈 Enhanced Visualizations")
                 
                 # Topic Distribution Bar Chart
-                st.subheader(f"📊 Topic Distributions (Analysis #{st.session_state.analysis_count})")
+                st.subheader("📊 Topic Distributions")
                 topic_dist_fig = plot_topic_distributions(topic_distributions, doc_names, topics)
-                st.plotly_chart(topic_dist_fig, use_container_width=True, key=f"topic_dist_chart_{st.session_state.analysis_count}")
+                st.plotly_chart(topic_dist_fig, use_container_width=True, key=f"topic_dist_{datetime.now().timestamp()}")
                 
                 # Similarity Network Graph
-                st.subheader(f"🕸️ Document Similarity Network (Analysis #{st.session_state.analysis_count})")
+                st.subheader("🕸️ Document Similarity Network")
                 network_threshold = st.slider(
                     "Similarity Threshold", 
                     min_value=0.1, 
                     max_value=0.9, 
                     value=st.session_state.get('last_threshold', 0.5), 
                     step=0.1,
-                    help="Adjust to show more/less connections",
-                    key=f"network_threshold_{st.session_state.analysis_count}"
+                    help="Adjust to show more/less connections"
                 )
                 network_fig = plot_similarity_network(similarity_matrix, doc_names, threshold=network_threshold)
                 if network_fig:
-                    st.plotly_chart(network_fig, use_container_width=True, key=f"network_chart_{st.session_state.analysis_count}")
+                    st.plotly_chart(network_fig, use_container_width=True, key=f"network_{datetime.now().timestamp()}")
                 
                 # Heatmap
-                st.subheader(f"🔥 Document Similarity Heatmap (Analysis #{st.session_state.analysis_count})")
+                st.subheader("🔥 Document Similarity Heatmap")
                 heatmap_fig = plot_similarity_heatmap(similarity_matrix, doc_names)
-                st.plotly_chart(heatmap_fig, use_container_width=True, key=f"heatmap_chart_{st.session_state.analysis_count}")
+                st.plotly_chart(heatmap_fig, use_container_width=True, key=f"heatmap_{datetime.now().timestamp()}")
                 
                 # Cluster Plot
-                st.subheader(f"🎨 Document Clusters (Analysis #{st.session_state.analysis_count})")
+                st.subheader("🎨 Document Clusters")
                 cluster_fig = plot_clusters(reduced_data, cluster_labels, doc_names, method=reduction_method, theme=theme, color_palette=color_palette)
-                st.plotly_chart(cluster_fig, use_container_width=True, key=f"cluster_chart_{st.session_state.analysis_count}")
+                st.plotly_chart(cluster_fig, use_container_width=True, key=f"clusters_{datetime.now().timestamp()}")
                 
                 # Enhanced Downloads Section
                 st.header("💾 Enhanced Download Options")
