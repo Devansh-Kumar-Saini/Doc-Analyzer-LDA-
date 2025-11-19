@@ -1,4 +1,0 @@
-This is a sample text file for testing purposes.
-It contains multiple lines of text.
-
-Last modified: 2025-11-09

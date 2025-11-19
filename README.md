@@ -27,4 +27,4 @@ streamlit run app.py
 - `app.py`: Main application code
 - `main.py`: Simple test script
 - `requirements.txt`: Python dependencies
-- `test_data/`: Sample documents for testing
+
